@@ -60,6 +60,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:18px}
 <div><label>Tipo de documento</label><select id="fType"><option>Citación</option><option>Resolución</option><option>Oficio judicial</option><option>Notificación</option><option>Requerimiento</option><option>Otro</option></select></div>
 <div><label>Organismo</label><select id="fOrg"><option>Fiscalía</option><option>Juzgado</option><option>Otro</option><option>No identificado</option></select></div>
 <div class="full"><label>Dependencia / autoridad remitente</label><input id="fAuthority" placeholder="Nombre del juzgado o fiscalía"></div>
+<div><label>Carácter / prioridad</label><input id="fPriority" placeholder="Ej.: URGENTE"></div>
 <div><label>Número de causa / expediente</label><input id="fCase"></div>
 <div><label>Fecha de recepción</label><input id="fReceived" type="date"></div>
 <div><label>Fecha de comparecencia</label><input id="fAppearance" type="date"></div>
@@ -121,6 +122,21 @@ async function ocrCanvas(canvas,label){
  });
  return (result.data.text||'').trim();
 }
+function pdfItemsToLines(items){
+ const rows=[];
+ for(const item of items){
+  const value=String(item.str||'').trim();
+  if(!value)continue;
+  const transform=item.transform||[];
+  const x=Number(transform[4]||0),y=Number(transform[5]||0);
+  let row=rows.find(r=>Math.abs(r.y-y)<2.5);
+  if(!row){row={y,parts:[]};rows.push(row)}
+  row.parts.push({x,value});
+ }
+ return rows.sort((a,b)=>b.y-a.y)
+  .map(row=>row.parts.sort((a,b)=>a.x-b.x).map(p=>p.value).join(' ').replace(/\s+/g,' ').trim())
+  .filter(Boolean).join('\n');
+}
 async function pdfText(file){
  const pdf=await openPdf(file);
  let text='',ocrPages=0;
@@ -129,7 +145,7 @@ async function pdfText(file){
   $('progressText').textContent='Leyendo PDF: página '+p+' de '+maxPages+'…';
   const page=await pdf.getPage(p);
   const content=await page.getTextContent({includeMarkedContent:true});
-  const pageText=(content.items||[]).map(x=>x.str||'').filter(Boolean).join(' ').trim();
+  const pageText=pdfItemsToLines(content.items||[]).trim();
   if(pageText.replace(/\s/g,'').length>=35){
    text+='\n\n[PÁGINA '+p+']\n'+pageText;
   }else{
@@ -197,39 +213,90 @@ $('analyzeBtn').onclick=async()=>{
  finally{$('analyzeBtn').disabled=false}
 };
 function find(pattern){const m=extractedText.match(pattern);return m?m[1].trim():''}
+function labelValues(text,label){
+ const source=String(text||'').replace(/\r/g,'');
+ const escaped=label.replace(/[.*+?^$()|[\]\\]/g,'\\$&');
+ const allLabels='(?:Procedencia|Destinatari[oa]|Domicilio|Car[aá]cter|DNI|D\\.N\\.I\\.?|Documento|Causa|Expediente|Se solicita|Comisar[ií]a interviniente)';
+ const values=[];
+ const lineRe=new RegExp('(?:^|\\n)\\s*'+escaped+'\\s*:\\s*([^\\n]*)','gi');
+ let m;
+ while((m=lineRe.exec(source))!==null){
+  let value=(m[1]||'').trim();
+  if(!value){
+   const rest=source.slice(lineRe.lastIndex);
+   value=(rest.split('\n').map(x=>x.trim()).find(Boolean)||'');
+  }
+  if(value)values.push(value);
+ }
+ if(values.length)return values;
+ const flatRe=new RegExp('(?:^|\\s)'+escaped+'\\s*:\\s*([\\s\\S]*?)(?=\\s+'+allLabels+'\\s*:|$)','gi');
+ while((m=flatRe.exec(source))!==null){const value=(m[1]||'').trim();if(value)values.push(value)}
+ return values;
+}
+function cleanPersonName(value){
+ let name=String(value||'').replace(/\s+/g,' ').trim();
+ name=name.replace(/^(?:(?:AL|A LA|A LOS|A LAS)\s+)?/i,'');
+ name=name.replace(/^(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+/i,'');
+ name=name.replace(/\s+(?:DNI|D\.?\s*N\.?\s*I\.?|DOCUMENTO|CUIL|DOMICILIO|DIRECCI[ÓO]N|TEL[EÉ]FONO|FECHA)\b[\s\S]*$/i,'');
+ name=name.replace(/[,:;.\-–—\s]+$/g,'').replace(/^[,:;.\-–—\s]+/g,'').replace(/\s+/g,' ').trim();
+ if(name.length<5||name.length>90)return '';
+ if(/^(?:JUEZ(?:A)?|FISCAL|SECRETARI[OA]|PROSECRETARI[OA]|MINISTERIO|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)\b/i.test(name))return '';
+ return /[a-záéíóúüñ]/i.test(name)?name:'';
+}
 function fillFromText(t){
  const low=t.toLowerCase();
- $('fType').value=/notificaci[oó]n/i.test(t)?'Notificación':/citaci[oó]n|c[ií]tese/i.test(t)?'Citación':/resuelve|resoluci[oó]n/i.test(t)?'Resolución':/oficio/i.test(t)?'Oficio judicial':'Otro';
- const authority=find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\n]{0,120})/i);
+ const procedencia=labelValues(t,'Procedencia')[0]||'';
+ $('fType').value=/notificaci[oó]n|destinatari[oa]|domicilio\s*:/i.test(t)?'Notificación':/citaci[oó]n|c[ií]tese/i.test(t)?'Citación':/resuelve|resoluci[oó]n/i.test(t)?'Resolución':/oficio/i.test(t)?'Oficio judicial':'Otro';
+ const authority=procedencia||find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\n]{0,120})/i);
  $('fAuthority').value=authority;
- $('fOrg').value=/defensor[ií]a/i.test(authority)?'Ministerio Público de la Defensa':/fiscal[ií]a/i.test(authority)?'Ministerio Público Fiscal':/juzgado|tribunal/i.test(authority)?'Poder Judicial':'No identificado';
+ $('fOrg').value=/fiscal[ií]a/i.test(authority)?'Fiscalía':/juzgado|tribunal/i.test(authority)?'Juzgado':authority?'Otro':'No identificado';
  $('fCase').value=find(/(?:causa|expediente)\s*(?:n[°º.]?\s*)?([\w\-\/\.]{5,40})/i);
- $('fAction').value=/notifi(?:que|car)|notifique/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento. Revisar el texto completo para consignar instrucciones y plazos.':find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\.\n]{0,250})/i);
- const dniMatches=[...t.matchAll(/(?:DNI|D\.N\.I\.?|Documento)\s*(?:N[°º.]?\s*)?([0-9.]{7,12})/gi)].map(m=>m[1].replace(/\./g,''));
- const primary=find(/(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\n]|\s+DNI)/i);
- const address=find(/DOMICILIO\s*:\s*([^\n]+)/i);
+ const priority=labelValues(t,'Carácter')[0]||'';
+ $('fPriority').value=priority;
+ const requests=[];
+ const requestMatch=t.match(/Se solicita[\s\S]{0,900}/i);
+ if(requestMatch)requests.push(requestMatch[0].trim());
+ const policeMatch=t.match(/Comisar[ií]a interviniente[\s\S]{0,350}/i);
+ if(policeMatch&&!requests.join(' ').includes(policeMatch[0]))requests.push(policeMatch[0].trim());
+ $('fAction').value=requests.length?requests.join('\n\n'):find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\.\n]{0,250})/i)||(/notific/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento.':'');
+ const notes=[];
+ if(priority)notes.push('Carácter: '+priority);
+ const deadlineInstruction=(t.match(/dentro de las\s+\d+\s+hs?\.?/i)||[])[0]||'';
+ if(deadlineInstruction)notes.push('Plazo indicado: '+deadlineInstruction);
+ $('fNotes').value=notes.join('. ');
+ const recipients=labelValues(t,'Destinatario').map(cleanPersonName).filter(Boolean);
+ const addresses=labelValues(t,'Domicilio');
+ const dnis=[...labelValues(t,'DNI'),...labelValues(t,'D.N.I.'),...labelValues(t,'Documento')];
  peopleDraft=[];
- if(primary||dniMatches.length){
-  peopleDraft.push({name:primary.replace(/\s+/g,' ').trim(),dni:dniMatches[0]||'',address:address});
+ if(recipients.length){
+  recipients.forEach((name,i)=>peopleDraft.push({
+   name,
+   dni:dnis.length===1?dnis[0].replace(/\D/g,''):((dnis[i]||'').replace(/\D/g,'')),
+   address:addresses.length===1?addresses[0]:(addresses[i]||'')
+  }));
+ }else{
+  const primary=find(/(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\n]|\s+DNI)/i);
+  const address=labelValues(t,'Domicilio')[0]||find(/DOMICILIO\s*:\s*([^\n]+)/i);
+  const dni=(find(/(?:DNI|D\.N\.I\.?|Documento)\s*(?:N[°º.]?\s*)?([0-9.]{7,12})/i)||'').replace(/\./g,'');
+  if(primary||dni)peopleDraft.push({name:cleanPersonName(primary),dni,address});
  }
- // No inventar otras personas a partir de nombres mencionados en carátulas.
  if(!peopleDraft.length)peopleDraft=[{name:'',dni:'',address:''}];
  renderPeople();
  const dateMatch=t.match(/(?:para\s+el\s+|el\s+)(\d{1,2}\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+\s+de\s+20\d{2})\s+a\s+las\s+(\d{1,2}:\d{2})/i);
  if(dateMatch){
   const months={enero:'01',febrero:'02',marzo:'03',abril:'04',mayo:'05',junio:'06',julio:'07',agosto:'08',septiembre:'09',octubre:'10',noviembre:'11',diciembre:'12'};
   const dm=dateMatch[1].match(/(\d{1,2})\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)\s+de\s+(20\d{2})/i);
-  if(dm&&months[dm[2].toLowerCase()])$('fAppearance').value=`${dm[3]}-${months[dm[2].toLowerCase()]}-${dm[1].padStart(2,'0')}T${dateMatch[2]}`;
+  if(dm&&months[dm[2].toLowerCase()])$('fAppearance').value=dm[3]+'-'+months[dm[2].toLowerCase()]+'-'+dm[1].padStart(2,'0')+'T'+dateMatch[2];
  }
  $('fReceived').value=new Date().toISOString().slice(0,10);
 }
 function renderPeople(){$('peopleFields').innerHTML=peopleDraft.map((p,i)=>`<div class="person"><div class="person-head"><b>Persona ${i+1}</b><button class="outline" onclick="removePerson(${i})">Quitar</button></div><label>Nombre y apellido</label><input value="${esc(p.name)}" onchange="peopleDraft[${i}].name=this.value"><label>DNI</label><input value="${esc(p.dni)}" onchange="peopleDraft[${i}].dni=this.value"><label>Domicilio</label><input value="${esc(p.address)}" onchange="peopleDraft[${i}].address=this.value"></div>`).join('')}
 window.removePerson=i=>{peopleDraft.splice(i,1);renderPeople()};$('addPerson').onclick=()=>{peopleDraft.push({name:'',dni:'',address:''});renderPeople()};
 $('cancelReview').onclick=()=>{$('review').classList.add('hidden')};
-$('saveDoc').onclick=()=>{const ps=peopleDraft.filter(p=>p.name.trim()||p.dni.trim());if(!ps.length){alert('Agregá al menos una persona o completá su nombre/DNI.');return}const id=Date.now().toString();records.push({id,number:'GJ-'+String(records.length+1).padStart(5,'0')+'/2026',type:$('fType').value,org:$('fOrg').value,authority:$('fAuthority').value,caseNo:$('fCase').value,received:$('fReceived').value,appearance:$('fAppearance').value,deadline:$('fDeadline').value,action:$('fAction').value,mail:$('fMail').value,notes:$('fNotes').value,people:ps,files:selectedFiles.map(f=>f.name),status:'Pendiente',created:new Date().toISOString()});saveLocal();$('review').classList.add('hidden');$('fileInput').value='';selectedFiles=[];$('fileStatus').textContent='Ningún archivo seleccionado.';$('analyzeBtn').disabled=true;showTab('docs')};
+$('saveDoc').onclick=()=>{const ps=peopleDraft.filter(p=>p.name.trim()||p.dni.trim());if(!ps.length){alert('Agregá al menos una persona o completá su nombre/DNI.');return}const id=Date.now().toString();records.push({id,number:'GJ-'+String(records.length+1).padStart(5,'0')+'/2026',type:$('fType').value,org:$('fOrg').value,authority:$('fAuthority').value,priority:$('fPriority').value,caseNo:$('fCase').value,received:$('fReceived').value,appearance:$('fAppearance').value,deadline:$('fDeadline').value,action:$('fAction').value,mail:$('fMail').value,notes:$('fNotes').value,people:ps,files:selectedFiles.map(f=>f.name),status:'Pendiente',created:new Date().toISOString()});saveLocal();$('review').classList.add('hidden');$('fileInput').value='';selectedFiles=[];$('fileStatus').textContent='Ningún archivo seleccionado.';$('analyzeBtn').disabled=true;showTab('docs')};
 $('search').oninput=renderDocs;
 function renderDocs(){const q=($('search').value||'').toLowerCase();const arr=records.filter(r=>JSON.stringify(r).toLowerCase().includes(q));$('docList').innerHTML=arr.length?arr.slice().reverse().map(r=>`<div class="carditem" onclick="openDetail('${r.id}')"><div class="person-head"><b>${esc(r.number)} · ${esc(r.type)}</b><span class="badge ${r.status==='Cumplido'?'ok':''}">${esc(r.status)}</span></div><div>${esc(r.authority||r.org)} · ${esc(r.caseNo)}</div><div class="muted">${r.people.length} persona(s) · ${r.deadline?'Vence: '+esc(r.deadline):'Sin fecha límite registrada'}</div></div>`).join(''):'<p class="muted">No se encontraron documentos.</p>'}
-window.openDetail=id=>{const r=records.find(x=>x.id===id);if(!r)return;$('detail').classList.remove('hidden');$('detail').innerHTML=`<h2>${esc(r.number)}</h2><p class="muted">${esc(r.type)} · ${esc(r.authority||r.org)}</p><p><b>Expediente:</b> ${esc(r.caseNo)}<br><b>Recepción:</b> ${esc(r.received)}<br><b>Comparecencia:</b> ${esc(r.appearance)}<br><b>Vencimiento:</b> ${esc(r.deadline||'No informado')}</p><p><b>Diligencia:</b> ${esc(r.action)}</p><h3>Personas y seguimiento</h3>${r.people.map((p,i)=>`<div class="person"><b>${esc(p.name||'Sin nombre')}</b><p class="muted">DNI: ${esc(p.dni)} · Domicilio: ${esc(p.address)}</p><label>Resultado individual</label><select onchange="updatePerson('${r.id}',${i},this.value)">${['Pendiente','En trámite','Notificada','No habida','Domicilio inexistente','Devuelta'].map(s=>`<option ${p.result===s?'selected':''}>${s}</option>`).join('')}</select></div>`).join('')}<label>Estado general</label><select onchange="updateStatus('${r.id}',this.value)">${['Pendiente','En trámite','Cumplido','Archivado'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select><p><b>Adjuntos:</b> ${esc(r.files.join(', '))}</p>${r.mail?`<p><a href="${esc(r.mail)}" target="_blank" rel="noopener">Abrir correo original ↗</a></p>`:''}<p class="muted">${esc(r.notes)}</p><div class="actions"><button class="outline" onclick="document.getElementById('detail').classList.add('hidden')">Cerrar detalle</button><button class="outline" onclick="deleteRecord('${r.id}')">Eliminar registro</button></div>`};
+window.openDetail=id=>{const r=records.find(x=>x.id===id);if(!r)return;$('detail').classList.remove('hidden');$('detail').innerHTML=`<h2>${esc(r.number)}</h2><p class="muted">${esc(r.type)} · ${esc(r.authority||r.org)}</p><p><b>Procedencia:</b> ${esc(r.authority||r.org)}<br><b>Carácter:</b> ${esc(r.priority||'No indicado')}<br><b>Expediente:</b> ${esc(r.caseNo)}<br><b>Recepción:</b> ${esc(r.received)}<br><b>Comparecencia:</b> ${esc(r.appearance)}<br><b>Vencimiento:</b> ${esc(r.deadline||'No informado')}</p><p><b>Diligencia:</b> ${esc(r.action)}</p><h3>Personas y seguimiento</h3>${r.people.map((p,i)=>`<div class="person"><b>${esc(p.name||'Sin nombre')}</b><p class="muted">DNI: ${esc(p.dni)} · Domicilio: ${esc(p.address)}</p><label>Resultado individual</label><select onchange="updatePerson('${r.id}',${i},this.value)">${['Pendiente','En trámite','Notificada','No habida','Domicilio inexistente','Devuelta'].map(s=>`<option ${p.result===s?'selected':''}>${s}</option>`).join('')}</select></div>`).join('')}<label>Estado general</label><select onchange="updateStatus('${r.id}',this.value)">${['Pendiente','En trámite','Cumplido','Archivado'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select><p><b>Adjuntos:</b> ${esc(r.files.join(', '))}</p>${r.mail?`<p><a href="${esc(r.mail)}" target="_blank" rel="noopener">Abrir correo original ↗</a></p>`:''}<p class="muted">${esc(r.notes)}</p><div class="actions"><button class="outline" onclick="document.getElementById('detail').classList.add('hidden')">Cerrar detalle</button><button class="outline" onclick="deleteRecord('${r.id}')">Eliminar registro</button></div>`};
 window.updatePerson=(id,i,v)=>{const r=records.find(x=>x.id===id);r.people[i].result=v;saveLocal();openDetail(id)};window.updateStatus=(id,v)=>{records.find(x=>x.id===id).status=v;saveLocal();openDetail(id)};window.deleteRecord=id=>{if(confirm('¿Eliminar este registro de prueba?')){records=records.filter(r=>r.id!==id);saveLocal();$('detail').classList.add('hidden')}};
 render();
 </script>
