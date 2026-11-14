@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#142b46">
+<title>Gestión Judicial</title>
+<style>
+:root{--navy:#142b46;--blue:#24527a;--bg:#f3f6fa;--line:#dce4ec;--muted:#64748b;--green:#16845b;--amber:#a66a00;--red:#b42318}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#172536}
+header{background:var(--navy);color:white;padding:18px max(16px,calc((100% - 1050px)/2));}
+header .brand{display:flex;align-items:center;gap:12px;font-weight:750;font-size:20px}header small{display:block;color:#cbd8e5;margin-top:5px}
+main{max-width:1050px;margin:20px auto;padding:0 14px}.tabs{display:flex;gap:8px;overflow:auto;margin-bottom:16px}
+button,.tab{border:0;border-radius:10px;padding:11px 14px;font-weight:650;cursor:pointer;background:#e6edf4;color:#20344a}
+button.primary,.tab.active{background:var(--navy);color:white}button.outline{background:white;border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.panel{background:white;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;box-shadow:0 2px 8px #122b4610}
+h1,h2,h3{margin:0 0 12px}h2{font-size:21px}h3{font-size:16px}.muted{color:var(--muted);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.stat{background:white;border:1px solid var(--line);border-radius:14px;padding:14px}.stat b{font-size:27px;display:block}
+label{font-size:13px;font-weight:650;display:block;margin:10px 0 5px}
+input,select,textarea{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;background:white;font:inherit;color:#172536}
+textarea{min-height:75px;resize:vertical}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.drop{border:2px dashed #9eb1c4;border-radius:14px;padding:24px;text-align:center;background:#f8fbfe}
+.person{border:1px solid var(--line);padding:12px;border-radius:12px;margin:10px 0}.person-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.row{display:flex;gap:10px;align-items:center}.row>*{flex:1}
+.badge{font-size:11px;padding:4px 8px;border-radius:20px;background:#fff2d7;color:#855500;white-space:nowrap}.badge.ok{background:#dcf5e9;color:#116444}
+.carditem{border:1px solid var(--line);border-radius:12px;padding:13px;margin:9px 0;cursor:pointer;background:white}.carditem:hover{border-color:#7595b5}
+.hidden{display:none!important}.notice{padding:11px;border-radius:10px;background:#fff7e6;color:#775000;font-size:13px;margin:10px 0}
+.good{background:#e8f7ef;color:#12613e}.bad{background:#fff0ef;color:#9b2118}
+progress{width:100%;height:9px}.field-confidence{font-size:11px;color:var(--muted)}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:18px}
+@media(max-width:650px){.grid,.stats{grid-template-columns:1fr 1fr}.grid .full{grid-column:1/-1}.panel{padding:14px}.tabs button{white-space:nowrap}}
+</style>
+</head>
+<body>
+<header><div class="brand"><span style="font-size:27px">⚖️</span><span>GESTIÓN JUDICIAL<small>Documentación, citaciones y diligencias</small></span></div></header>
+<main>
+<div class="notice"><b>Versión de prueba:</b> no cargues documentación judicial real ni datos personales sensibles. Los registros se guardan solamente en este navegador y no están protegidos como un sistema institucional.</div>
+<nav class="tabs">
+<button class="tab active" data-tab="home">Inicio</button><button class="tab" data-tab="new">Nuevo ingreso con IA</button><button class="tab" data-tab="docs">Documentos</button>
+</nav>
+<section id="home">
+<div class="stats"><div class="stat"><span class="muted">Documentos</span><b id="countDocs">0</b></div><div class="stat"><span class="muted">Pendientes</span><b id="countPending">0</b></div><div class="stat"><span class="muted">Personas</span><b id="countPeople">0</b></div></div>
+<div class="panel"><h2>Panel principal</h2><p class="muted">Registrá únicamente los mensajes y documentos que previamente hayas filtrado y confirmado que corresponden a tu dependencia.</p><button class="primary" onclick="showTab('new')">＋ Nuevo ingreso</button></div>
+<div class="panel"><h3>Últimos documentos</h3><div id="recent"><p class="muted">Todavía no hay registros.</p></div></div>
+</section>
+<section id="new" class="hidden">
+<div class="panel">
+<h2>1. Adjuntar documento</h2><p class="muted">Subí una fotografía o PDF. Se intentará leer el texto en el dispositivo mediante OCR y extracción automática.</p>
+<div class="drop"><div style="font-size:30px">📎</div><b>Seleccionar PDF o fotografía</b><input id="fileInput" type="file" accept="application/pdf,image/*" multiple style="margin-top:12px"><p class="muted">PDF, JPG, PNG o WEBP</p></div>
+<div id="fileStatus" class="muted" style="margin-top:10px">Ningún archivo seleccionado.</div>
+<div class="actions"><button class="primary" id="analyzeBtn" disabled>✦ Analizar con IA / OCR</button><button class="outline" id="clearFiles">Quitar archivos</button></div>
+<div id="progressArea" class="hidden"><p id="progressText" class="muted">Procesando…</p><progress id="progressBar" max="100" value="0"></progress></div>
+</div>
+<div id="review" class="panel hidden">
+<h2>2. Revisar datos detectados</h2>
+<div class="notice good">La extracción es una propuesta. Verificá cada campo contra el documento original antes de guardar.</div>
+<div class="grid">
+<div><label>Tipo de documento</label><select id="fType"><option>Citación</option><option>Resolución</option><option>Oficio judicial</option><option>Notificación</option><option>Requerimiento</option><option>Otro</option></select></div>
+<div><label>Organismo</label><select id="fOrg"><option>Fiscalía</option><option>Juzgado</option><option>Otro</option><option>No identificado</option></select></div>
+<div class="full"><label>Dependencia / autoridad remitente</label><input id="fAuthority" placeholder="Nombre del juzgado o fiscalía"></div>
+<div><label>Número de causa / expediente</label><input id="fCase"></div>
+<div><label>Fecha de recepción</label><input id="fReceived" type="date"></div>
+<div><label>Fecha de comparecencia</label><input id="fAppearance" type="date"></div>
+<div><label>Fecha límite de cumplimiento</label><input id="fDeadline" type="date"></div>
+<div class="full"><label>Diligencia solicitada</label><textarea id="fAction" placeholder="Descripción de la medida o diligencia"></textarea></div>
+<div class="full"><label>Enlace al correo original (opcional)</label><input id="fMail" type="url" placeholder="https://mail.google.com/..."></div>
+<div class="full"><label>Observaciones</label><textarea id="fNotes"></textarea></div>
+</div>
+<h3 style="margin-top:18px">Personas detectadas</h3><p class="muted">Una misma resolución puede incluir varias personas. Corregí, quitá o agregá las que correspondan.</p>
+<div id="peopleFields"></div>
+<button class="outline" id="addPerson">＋ Agregar persona</button>
+<div class="actions"><button class="primary" id="saveDoc">Confirmar y registrar</button><button class="outline" id="cancelReview">Cancelar</button></div>
+</div>
+</section>
+<section id="docs" class="hidden">
+<div class="panel"><h2>Documentos registrados</h2><input id="search" placeholder="Buscar por nombre, DNI, expediente o dependencia…"><div id="docList" style="margin-top:12px"><p class="muted">No hay documentos.</p></div></div>
+<div id="detail" class="panel hidden"></div>
+</section>
+</main>
+<footer>GESTIÓN JUDICIAL · Prototipo local · No es un sistema oficial</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
+<script>
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const $=id=>document.getElementById(id);let selectedFiles=[],extractedText='',peopleDraft=[];
+let records=JSON.parse(localStorage.getItem('gj_records_demo')||'[]');
+function saveLocal(){localStorage.setItem('gj_records_demo',JSON.stringify(records));render()}
+function showTab(t){document.querySelectorAll('main>section').forEach(s=>s.classList.add('hidden'));$(t).classList.remove('hidden');document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));if(t==='docs')renderDocs()}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+function render(){ $('countDocs').textContent=records.length;$('countPending').textContent=records.filter(r=>r.status!=='Cumplido'&&r.status!=='Archivado').length;$('countPeople').textContent=records.reduce((n,r)=>n+r.people.length,0);
+$('recent').innerHTML=records.length?records.slice().reverse().slice(0,5).map(r=>`<div class="carditem" onclick="openDetail('${r.id}')"><b>${esc(r.number)} · ${esc(r.type)}</b><div class="muted">${esc(r.authority||r.org)} · ${r.people.length} persona(s)</div></div>`).join(''):'<p class="muted">Todavía no hay registros.</p>'}
+function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+$('fileInput').onchange=e=>{selectedFiles=[...e.target.files];$('fileStatus').textContent=selectedFiles.map(f=>f.name).join(', ')||'Ningún archivo seleccionado.';$('analyzeBtn').disabled=!selectedFiles.length};
+$('clearFiles').onclick=()=>{selectedFiles=[];$('fileInput').value='';$('fileStatus').textContent='Ningún archivo seleccionado.';$('analyzeBtn').disabled=true;$('review').classList.add('hidden')};
+async function pdfText(file){
+ const data=new Uint8Array(await file.arrayBuffer());
+ const pdf=await pdfjsLib.getDocument({data}).promise;
+ let text='';
+ for(let p=1;p<=Math.min(pdf.numPages,20);p++){
+  const page=await pdf.getPage(p), content=await page.getTextContent();
+  text+=content.items.map(x=>x.str).join(' ')+'\\n';
+ }
+ return text;
+}
+async function ocrCanvas(canvas,label){
+ if(!window.Tesseract)throw new Error('No se pudo cargar el motor OCR. Revisá tu conexión a internet.');
+ // Mejora contraste de escaneos grises/fotocopias antes del reconocimiento.
+ const ctx=canvas.getContext('2d'), img=ctx.getImageData(0,0,canvas.width,canvas.height), d=img.data;
+ for(let i=0;i<d.length;i+=4){
+  const y=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  const v=y>232?255:(y<105?0:Math.max(0,Math.min(255,(y-105)*1.85)));
+  d[i]=d[i+1]=d[i+2]=v;
+ }
+ ctx.putImageData(img,0,0);
+ const result=await Tesseract.recognize(canvas,'spa',{
+  logger:m=>{if(m.status==='recognizing text')$('progressText').textContent=`OCR ${label}: ${Math.round(m.progress*100)}%`},
+  tessedit_pageseg_mode:'6',
+  preserve_interword_spaces:'1'
+ });
+ return result.data.text||'';
+}
+async function imageText(file){
+ const img=new Image(), url=URL.createObjectURL(file);
+ try{
+  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url});
+  const scale=Math.max(2,Math.min(3,2600/Math.max(img.width,img.height)));
+  const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+  return await ocrCanvas(c,file.name);
+ } finally {URL.revokeObjectURL(url)}
+}
+async function scannedPdfText(file){
+ const data=new Uint8Array(await file.arrayBuffer()), pdf=await pdfjsLib.getDocument({data}).promise;
+ let text='';
+ for(let p=1;p<=Math.min(pdf.numPages,20);p++){
+  $('progressText').textContent=`OCR de página ${p} de ${Math.min(pdf.numPages,20)}…`;
+  const page=await pdf.getPage(p), vp=page.getViewport({scale:2.6});
+  const c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);
+  await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+  text+='\\n'+await ocrCanvas(c,`página ${p}`);
+ }
+ return text;
+}
+$('analyzeBtn').onclick=async()=>{if(!selectedFiles.length)return;$('progressArea').classList.remove('hidden');$('analyzeBtn').disabled=true;extractedText='';try{for(let i=0;i<selectedFiles.length;i++){let f=selectedFiles[i];$('progressText').textContent=`Procesando ${f.name} (${i+1}/${selectedFiles.length})`;let txt=f.type==='application/pdf'?await pdfText(f):await imageText(f);if(f.type==='application/pdf'&&txt.replace(/\\s/g,'').length<80){$('progressText').textContent='PDF escaneado o sin capa de texto: aplicando OCR…';txt=await scannedPdfText(f)}extractedText+='\\n'+txt}
+fillFromText(extractedText);$('progressText').textContent='OCR terminado. Verificá nombres, DNI, fechas y plazos contra el original antes de guardar.';$('review').classList.remove('hidden');}catch(err){alert('No se pudo analizar el archivo: '+err.message)}finally{$('analyzeBtn').disabled=false}};
+function find(pattern){const m=extractedText.match(pattern);return m?m[1].trim():''}
+function fillFromText(t){
+ const low=t.toLowerCase();
+ $('fType').value=/notificaci[oó]n/i.test(t)?'Notificación':/citaci[oó]n|c[ií]tese/i.test(t)?'Citación':/resuelve|resoluci[oó]n/i.test(t)?'Resolución':/oficio/i.test(t)?'Oficio judicial':'Otro';
+ const authority=find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\\n]{0,120})/i);
+ $('fAuthority').value=authority;
+ $('fOrg').value=/defensor[ií]a/i.test(authority)?'Ministerio Público de la Defensa':/fiscal[ií]a/i.test(authority)?'Ministerio Público Fiscal':/juzgado|tribunal/i.test(authority)?'Poder Judicial':'No identificado';
+ $('fCase').value=find(/(?:causa|expediente)\\s*(?:n[°º.]?\\s*)?([\\w\\-\\/\\.]{5,40})/i);
+ $('fAction').value=/notifi(?:que|car)|notifique/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento. Revisar el texto completo para consignar instrucciones y plazos.':find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\\.\\n]{0,250})/i);
+ const dniMatches=[...t.matchAll(/(?:DNI|D\\.N\\.I\\.?|Documento)\\s*(?:N[°º.]?\\s*)?([0-9.]{7,12})/gi)].map(m=>m[1].replace(/\\./g,''));
+ const primary=find(/(?:SR\\.?|SRA\\.?|SEÑOR(?:A)?)\\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\\n]|\\s+DNI)/i);
+ const address=find(/DOMICILIO\\s*:\\s*([^\\n]+)/i);
+ peopleDraft=[];
+ if(primary||dniMatches.length){
+  peopleDraft.push({name:primary.replace(/\\s+/g,' ').trim(),dni:dniMatches[0]||'',address:address});
+ }
+ // No inventar otras personas a partir de nombres mencionados en carátulas.
+ if(!peopleDraft.length)peopleDraft=[{name:'',dni:'',address:''}];
+ renderPeople();
+ const dateMatch=t.match(/(?:para\\s+el\\s+|el\\s+)(\\d{1,2}\\s+de\\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+\\s+de\\s+20\\d{2})\\s+a\\s+las\\s+(\\d{1,2}:\\d{2})/i);
+ if(dateMatch){
+  const months={enero:'01',febrero:'02',marzo:'03',abril:'04',mayo:'05',junio:'06',julio:'07',agosto:'08',septiembre:'09',octubre:'10',noviembre:'11',diciembre:'12'};
+  const dm=dateMatch[1].match(/(\\d{1,2})\\s+de\\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)\\s+de\\s+(20\\d{2})/i);
+  if(dm&&months[dm[2].toLowerCase()])$('fAppearance').value=`${dm[3]}-${months[dm[2].toLowerCase()]}-${dm[1].padStart(2,'0')}T${dateMatch[2]}`;
+ }
+ $('fReceived').value=new Date().toISOString().slice(0,10);
+}
+function renderPeople(){$('peopleFields').innerHTML=peopleDraft.map((p,i)=>`<div class="person"><div class="person-head"><b>Persona ${i+1}</b><button class="outline" onclick="removePerson(${i})">Quitar</button></div><label>Nombre y apellido</label><input value="${esc(p.name)}" onchange="peopleDraft[${i}].name=this.value"><label>DNI</label><input value="${esc(p.dni)}" onchange="peopleDraft[${i}].dni=this.value"><label>Domicilio</label><input value="${esc(p.address)}" onchange="peopleDraft[${i}].address=this.value"></div>`).join('')}
+window.removePerson=i=>{peopleDraft.splice(i,1);renderPeople()};$('addPerson').onclick=()=>{peopleDraft.push({name:'',dni:'',address:''});renderPeople()};
+$('cancelReview').onclick=()=>{$('review').classList.add('hidden')};
+$('saveDoc').onclick=()=>{const ps=peopleDraft.filter(p=>p.name.trim()||p.dni.trim());if(!ps.length){alert('Agregá al menos una persona o completá su nombre/DNI.');return}const id=Date.now().toString();records.push({id,number:'GJ-'+String(records.length+1).padStart(5,'0')+'/2026',type:$('fType').value,org:$('fOrg').value,authority:$('fAuthority').value,caseNo:$('fCase').value,received:$('fReceived').value,appearance:$('fAppearance').value,deadline:$('fDeadline').value,action:$('fAction').value,mail:$('fMail').value,notes:$('fNotes').value,people:ps,files:selectedFiles.map(f=>f.name),status:'Pendiente',created:new Date().toISOString()});saveLocal();$('review').classList.add('hidden');$('fileInput').value='';selectedFiles=[];$('fileStatus').textContent='Ningún archivo seleccionado.';$('analyzeBtn').disabled=true;showTab('docs')};
+$('search').oninput=renderDocs;
+function renderDocs(){const q=($('search').value||'').toLowerCase();const arr=records.filter(r=>JSON.stringify(r).toLowerCase().includes(q));$('docList').innerHTML=arr.length?arr.slice().reverse().map(r=>`<div class="carditem" onclick="openDetail('${r.id}')"><div class="person-head"><b>${esc(r.number)} · ${esc(r.type)}</b><span class="badge ${r.status==='Cumplido'?'ok':''}">${esc(r.status)}</span></div><div>${esc(r.authority||r.org)} · ${esc(r.caseNo)}</div><div class="muted">${r.people.length} persona(s) · ${r.deadline?'Vence: '+esc(r.deadline):'Sin fecha límite registrada'}</div></div>`).join(''):'<p class="muted">No se encontraron documentos.</p>'}
+window.openDetail=id=>{const r=records.find(x=>x.id===id);if(!r)return;$('detail').classList.remove('hidden');$('detail').innerHTML=`<h2>${esc(r.number)}</h2><p class="muted">${esc(r.type)} · ${esc(r.authority||r.org)}</p><p><b>Expediente:</b> ${esc(r.caseNo)}<br><b>Recepción:</b> ${esc(r.received)}<br><b>Comparecencia:</b> ${esc(r.appearance)}<br><b>Vencimiento:</b> ${esc(r.deadline||'No informado')}</p><p><b>Diligencia:</b> ${esc(r.action)}</p><h3>Personas y seguimiento</h3>${r.people.map((p,i)=>`<div class="person"><b>${esc(p.name||'Sin nombre')}</b><p class="muted">DNI: ${esc(p.dni)} · Domicilio: ${esc(p.address)}</p><label>Resultado individual</label><select onchange="updatePerson('${r.id}',${i},this.value)">${['Pendiente','En trámite','Notificada','No habida','Domicilio inexistente','Devuelta'].map(s=>`<option ${p.result===s?'selected':''}>${s}</option>`).join('')}</select></div>`).join('')}<label>Estado general</label><select onchange="updateStatus('${r.id}',this.value)">${['Pendiente','En trámite','Cumplido','Archivado'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select><p><b>Adjuntos:</b> ${esc(r.files.join(', '))}</p>${r.mail?`<p><a href="${esc(r.mail)}" target="_blank" rel="noopener">Abrir correo original ↗</a></p>`:''}<p class="muted">${esc(r.notes)}</p><div class="actions"><button class="outline" onclick="document.getElementById('detail').classList.add('hidden')">Cerrar detalle</button><button class="outline" onclick="deleteRecord('${r.id}')">Eliminar registro</button></div>`};
+window.updatePerson=(id,i,v)=>{const r=records.find(x=>x.id===id);r.people[i].result=v;saveLocal();openDetail(id)};window.updateStatus=(id,v)=>{records.find(x=>x.id===id).status=v;saveLocal();openDetail(id)};window.deleteRecord=id=>{if(confirm('¿Eliminar este registro de prueba?')){records=records.filter(r=>r.id!==id);saveLocal();$('detail').classList.add('hidden')}};
+render();
+</script>
+</body></html>
