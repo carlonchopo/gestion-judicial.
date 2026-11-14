@@ -200,25 +200,25 @@ function find(pattern){const m=extractedText.match(pattern);return m?m[1].trim()
 function fillFromText(t){
  const low=t.toLowerCase();
  $('fType').value=/notificaci[oó]n/i.test(t)?'Notificación':/citaci[oó]n|c[ií]tese/i.test(t)?'Citación':/resuelve|resoluci[oó]n/i.test(t)?'Resolución':/oficio/i.test(t)?'Oficio judicial':'Otro';
- const authority=find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\\n]{0,120})/i);
+ const authority=find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\n]{0,120})/i);
  $('fAuthority').value=authority;
  $('fOrg').value=/defensor[ií]a/i.test(authority)?'Ministerio Público de la Defensa':/fiscal[ií]a/i.test(authority)?'Ministerio Público Fiscal':/juzgado|tribunal/i.test(authority)?'Poder Judicial':'No identificado';
- $('fCase').value=find(/(?:causa|expediente)\\s*(?:n[°º.]?\\s*)?([\\w\\-\\/\\.]{5,40})/i);
- $('fAction').value=/notifi(?:que|car)|notifique/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento. Revisar el texto completo para consignar instrucciones y plazos.':find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\\.\\n]{0,250})/i);
- const dniMatches=[...t.matchAll(/(?:DNI|D\\.N\\.I\\.?|Documento)\\s*(?:N[°º.]?\\s*)?([0-9.]{7,12})/gi)].map(m=>m[1].replace(/\\./g,''));
- const primary=find(/(?:SR\\.?|SRA\\.?|SEÑOR(?:A)?)\\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\\n]|\\s+DNI)/i);
- const address=find(/DOMICILIO\\s*:\\s*([^\\n]+)/i);
+ $('fCase').value=find(/(?:causa|expediente)\s*(?:n[°º.]?\s*)?([\w\-\/\.]{5,40})/i);
+ $('fAction').value=/notifi(?:que|car)|notifique/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento. Revisar el texto completo para consignar instrucciones y plazos.':find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\.\n]{0,250})/i);
+ const dniMatches=[...t.matchAll(/(?:DNI|D\.N\.I\.?|Documento)\s*(?:N[°º.]?\s*)?([0-9.]{7,12})/gi)].map(m=>m[1].replace(/\./g,''));
+ const primary=find(/(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\n]|\s+DNI)/i);
+ const address=find(/DOMICILIO\s*:\s*([^\n]+)/i);
  peopleDraft=[];
  if(primary||dniMatches.length){
-  peopleDraft.push({name:primary.replace(/\\s+/g,' ').trim(),dni:dniMatches[0]||'',address:address});
+  peopleDraft.push({name:primary.replace(/\s+/g,' ').trim(),dni:dniMatches[0]||'',address:address});
  }
  // No inventar otras personas a partir de nombres mencionados en carátulas.
  if(!peopleDraft.length)peopleDraft=[{name:'',dni:'',address:''}];
  renderPeople();
- const dateMatch=t.match(/(?:para\\s+el\\s+|el\\s+)(\\d{1,2}\\s+de\\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+\\s+de\\s+20\\d{2})\\s+a\\s+las\\s+(\\d{1,2}:\\d{2})/i);
+ const dateMatch=t.match(/(?:para\s+el\s+|el\s+)(\d{1,2}\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+\s+de\s+20\d{2})\s+a\s+las\s+(\d{1,2}:\d{2})/i);
  if(dateMatch){
   const months={enero:'01',febrero:'02',marzo:'03',abril:'04',mayo:'05',junio:'06',julio:'07',agosto:'08',septiembre:'09',octubre:'10',noviembre:'11',diciembre:'12'};
-  const dm=dateMatch[1].match(/(\\d{1,2})\\s+de\\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)\\s+de\\s+(20\\d{2})/i);
+  const dm=dateMatch[1].match(/(\d{1,2})\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)\s+de\s+(20\d{2})/i);
   if(dm&&months[dm[2].toLowerCase()])$('fAppearance').value=`${dm[3]}-${months[dm[2].toLowerCase()]}-${dm[1].padStart(2,'0')}T${dateMatch[2]}`;
  }
  $('fReceived').value=new Date().toISOString().slice(0,10);
