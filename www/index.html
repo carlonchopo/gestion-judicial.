@@ -48,7 +48,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:18px}
 <section id="new" class="hidden">
 <div class="panel">
 <h2>1. Adjuntar documento</h2><p class="muted">Subí una fotografía o PDF. Se intentará leer el texto en el dispositivo mediante OCR y extracción automática.</p>
-<div class="drop"><div style="font-size:30px">📎</div><b>Seleccionar PDF o fotografía</b><input id="fileInput" type="file" accept="application/pdf,image/*" multiple style="margin-top:12px"><p class="muted">PDF, JPG, PNG o WEBP</p></div>
+<div class="drop"><div style="font-size:30px">📎</div><b>Seleccionar PDF o fotografía</b><input id="fileInput" type="file" accept="application/pdf,image/*,.docx,.txt,.rtf" multiple style="margin-top:12px"><p class="muted">PDF, JPG, PNG o WEBP</p></div>
 <div id="fileStatus" class="muted" style="margin-top:10px">Ningún archivo seleccionado.</div>
 <div class="actions"><button class="primary" id="analyzeBtn" disabled>✦ Analizar con IA / OCR</button><button class="outline" id="clearFiles">Quitar archivos</button></div>
 <div id="progressArea" class="hidden"><p id="progressText" class="muted">Procesando…</p><progress id="progressBar" max="100" value="0"></progress></div>
@@ -82,6 +82,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:18px}
 <footer>GESTIÓN JUDICIAL · Prototipo local · No es un sistema oficial</footer>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 <script>
 if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const $=id=>document.getElementById(id);let selectedFiles=[],extractedText='',peopleDraft=[];
@@ -94,57 +95,107 @@ $('recent').innerHTML=records.length?records.slice().reverse().slice(0,5).map(r=
 function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 $('fileInput').onchange=e=>{selectedFiles=[...e.target.files];$('fileStatus').textContent=selectedFiles.map(f=>f.name).join(', ')||'Ningún archivo seleccionado.';$('analyzeBtn').disabled=!selectedFiles.length};
 $('clearFiles').onclick=()=>{selectedFiles=[];$('fileInput').value='';$('fileStatus').textContent='Ningún archivo seleccionado.';$('analyzeBtn').disabled=true;$('review').classList.add('hidden')};
-async function pdfText(file){
+async function openPdf(file){
  const data=new Uint8Array(await file.arrayBuffer());
- const pdf=await pdfjsLib.getDocument({data}).promise;
- let text='';
- for(let p=1;p<=Math.min(pdf.numPages,20);p++){
-  const page=await pdf.getPage(p), content=await page.getTextContent();
-  text+=content.items.map(x=>x.str).join(' ')+'\\n';
+ if(!window.pdfjsLib) throw new Error('No se pudo cargar el lector PDF. Comprobá la conexión a internet y volvé a intentar.');
+ try{return await pdfjsLib.getDocument({data,isEvalSupported:false}).promise}
+ catch(first){
+  try{return await pdfjsLib.getDocument({data,disableWorker:true,isEvalSupported:false}).promise}
+  catch(second){throw new Error('No se pudo abrir el PDF. Puede estar dañado, protegido con contraseña o usar una codificación no compatible. Detalle: '+(second.message||first.message))}
  }
- return text;
 }
 async function ocrCanvas(canvas,label){
  if(!window.Tesseract)throw new Error('No se pudo cargar el motor OCR. Revisá tu conexión a internet.');
- // Mejora contraste de escaneos grises/fotocopias antes del reconocimiento.
- const ctx=canvas.getContext('2d'), img=ctx.getImageData(0,0,canvas.width,canvas.height), d=img.data;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});
+ const img=ctx.getImageData(0,0,canvas.width,canvas.height), d=img.data;
  for(let i=0;i<d.length;i+=4){
   const y=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-  const v=y>232?255:(y<105?0:Math.max(0,Math.min(255,(y-105)*1.85)));
+  const v=y>238?255:(y<95?0:Math.max(0,Math.min(255,(y-95)*1.8)));
   d[i]=d[i+1]=d[i+2]=v;
  }
  ctx.putImageData(img,0,0);
- const result=await Tesseract.recognize(canvas,'spa',{
-  logger:m=>{if(m.status==='recognizing text')$('progressText').textContent=`OCR ${label}: ${Math.round(m.progress*100)}%`},
-  tessedit_pageseg_mode:'6',
+ const result=await Tesseract.recognize(canvas,'spa+eng',{
+  logger:m=>{if(m.status==='recognizing text')$('progressText').textContent='Reconociendo '+label+': '+Math.round(m.progress*100)+'%'},
+  tessedit_pageseg_mode:'3',
   preserve_interword_spaces:'1'
  });
- return result.data.text||'';
+ return (result.data.text||'').trim();
+}
+async function pdfText(file){
+ const pdf=await openPdf(file);
+ let text='',ocrPages=0;
+ const maxPages=Math.min(pdf.numPages,100);
+ for(let p=1;p<=maxPages;p++){
+  $('progressText').textContent='Leyendo PDF: página '+p+' de '+maxPages+'…';
+  const page=await pdf.getPage(p);
+  const content=await page.getTextContent({includeMarkedContent:true});
+  const pageText=(content.items||[]).map(x=>x.str||'').filter(Boolean).join(' ').trim();
+  if(pageText.replace(/\s/g,'').length>=35){
+   text+='\n\n[PÁGINA '+p+']\n'+pageText;
+  }else{
+   $('progressText').textContent='La página '+p+' no tiene texto seleccionable. Aplicando OCR…';
+   const viewport=page.getViewport({scale:2.5});
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+   await page.render({canvasContext:canvas.getContext('2d',{willReadFrequently:true}),viewport}).promise;
+   const recognized=await ocrCanvas(canvas,'página '+p);
+   text+='\n\n[PÁGINA '+p+' - OCR]\n'+recognized;
+   ocrPages++;
+   canvas.width=canvas.height=1;
+  }
+ }
+ if(pdf.numPages>maxPages)text+='\n\n[AVISO: el archivo tiene '+pdf.numPages+' páginas; se procesaron las primeras '+maxPages+'. Dividí el PDF para analizar el resto.]';
+ if(!text.trim())throw new Error('El PDF se abrió, pero no se pudo extraer texto ni reconocer contenido. Probá exportarlo nuevamente o adjuntar una imagen nítida.');
+ return text;
 }
 async function imageText(file){
- const img=new Image(), url=URL.createObjectURL(file);
+ const img=new Image(),url=URL.createObjectURL(file);
  try{
-  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url});
-  const scale=Math.max(2,Math.min(3,2600/Math.max(img.width,img.height)));
+  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('No se pudo abrir la imagen. Convertí HEIC/TIFF a JPG o PNG.'));img.src=url});
+  const scale=Math.max(2,Math.min(3,2800/Math.max(img.width,img.height)));
   const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);
   c.getContext('2d').drawImage(img,0,0,c.width,c.height);
   return await ocrCanvas(c,file.name);
- } finally {URL.revokeObjectURL(url)}
+ }finally{URL.revokeObjectURL(url)}
 }
-async function scannedPdfText(file){
- const data=new Uint8Array(await file.arrayBuffer()), pdf=await pdfjsLib.getDocument({data}).promise;
- let text='';
- for(let p=1;p<=Math.min(pdf.numPages,20);p++){
-  $('progressText').textContent=`OCR de página ${p} de ${Math.min(pdf.numPages,20)}…`;
-  const page=await pdf.getPage(p), vp=page.getViewport({scale:2.6});
-  const c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);
-  await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-  text+='\\n'+await ocrCanvas(c,`página ${p}`);
+async function officeOrText(file){
+ const name=file.name.toLowerCase();
+ if(name.endsWith('.docx')){
+  if(!window.mammoth)throw new Error('No se pudo cargar el lector DOCX. Revisá la conexión a internet.');
+  const arrayBuffer=await file.arrayBuffer();
+  const result=await mammoth.extractRawText({arrayBuffer});
+  return result.value||'';
  }
- return text;
+ const raw=await file.text();
+ if(name.endsWith('.rtf'))return raw.replace(/\\[a-z]+-?\\d* ?/gi,' ').replace(/[{}]/g,' ').replace(/\\'[0-9a-f]{2}/gi,' ');
+ return raw;
 }
-$('analyzeBtn').onclick=async()=>{if(!selectedFiles.length)return;$('progressArea').classList.remove('hidden');$('analyzeBtn').disabled=true;extractedText='';try{for(let i=0;i<selectedFiles.length;i++){let f=selectedFiles[i];$('progressText').textContent=`Procesando ${f.name} (${i+1}/${selectedFiles.length})`;let txt=f.type==='application/pdf'?await pdfText(f):await imageText(f);if(f.type==='application/pdf'&&txt.replace(/\\s/g,'').length<80){$('progressText').textContent='PDF escaneado o sin capa de texto: aplicando OCR…';txt=await scannedPdfText(f)}extractedText+='\\n'+txt}
-fillFromText(extractedText);$('progressText').textContent='OCR terminado. Verificá nombres, DNI, fechas y plazos contra el original antes de guardar.';$('review').classList.remove('hidden');}catch(err){alert('No se pudo analizar el archivo: '+err.message)}finally{$('analyzeBtn').disabled=false}};
+$('analyzeBtn').onclick=async()=>{
+ if(!selectedFiles.length)return;
+ $('progressArea').classList.remove('hidden');$('analyzeBtn').disabled=true;extractedText='';
+ const errors=[];
+ try{
+  for(let i=0;i<selectedFiles.length;i++){
+   const f=selectedFiles[i],name=f.name.toLowerCase();
+   $('progressText').textContent='Procesando '+f.name+' ('+(i+1)+'/'+selectedFiles.length+')';
+   try{
+    let txt;
+    if(f.type==='application/pdf'||name.endsWith('.pdf'))txt=await pdfText(f);
+    else if(f.type.startsWith('image/'))txt=await imageText(f);
+    else if(name.endsWith('.docx')||name.endsWith('.txt')||name.endsWith('.rtf'))txt=await officeOrText(f);
+    else throw new Error('Formato no compatible. Usá PDF, JPG, PNG, WEBP, DOCX, TXT o RTF.');
+    if(!txt.trim())throw new Error('No se detectó texto legible en este archivo.');
+    extractedText+='\n\n===== ARCHIVO: '+f.name+' =====\n'+txt;
+   }catch(fileError){errors.push(f.name+': '+fileError.message)}
+  }
+  if(!extractedText.trim())throw new Error(errors.join('\n')||'No se pudo extraer texto de los archivos.');
+  fillFromText(extractedText);
+  $('progressText').textContent='Lectura finalizada. Revisá los datos detectados y comparalos con el original.'+(errors.length?' Archivos con problemas: '+errors.join(' | '):'');
+  $('review').classList.remove('hidden');
+  if(errors.length)alert('Se pudieron leer algunos archivos, pero otros tuvieron problemas:\n\n'+errors.join('\n'));
+ }catch(err){alert('No se pudo analizar el archivo: '+err.message);$('progressText').textContent='No se pudo completar la lectura.'}
+ finally{$('analyzeBtn').disabled=false}
+};
 function find(pattern){const m=extractedText.match(pattern);return m?m[1].trim():''}
 function fillFromText(t){
  const low=t.toLowerCase();
