@@ -1,0 +1,16 @@
+{
+  "name": "gestion-judicial",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicación móvil Gestión Judicial",
+  "scripts": {
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('www',{recursive:true});if(!fs.existsSync('www/index.html'))throw new Error('Falta www/index.html')\""
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3"
+  }
+}
