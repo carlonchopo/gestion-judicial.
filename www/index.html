@@ -252,7 +252,7 @@ function cleanPersonName(value){
 function parsePeopleFromText(text){
  const lines=textLines(text);
  const recipientPattern=/^(?:destinatari[oa](?:\s+(?:de\s+la\s+)?notificaci[oó]n)?|persona\s+(?:a\s+notificar|a\s+citar|notificada|citada)|nombre\s+y\s+apellido|notificar\s+a|citar\s+a|intimar\s+a|emplazar\s+a|requerir\s+a)\s*[:\-]?\s*(.*)$/i;
- const honorificPattern=/^(?:sr\.?|sra\.?|señor(?:a)?|don|doña)\s*[:,.-]?\s+(.+)$/i;
+ const honorificPattern=/(?:^|[,:;.\s])(?:sr\.?\s*\/\s*sra\.?|sr\.?\/a\.?|sra\.?|sr\.?|señor(?:a)?|don|doña)\s*[:,.-]?\s+(.+)$/i
  const recipients=[];
  function add(name,index){
   const cleaned=cleanPersonName(name);
@@ -295,7 +295,8 @@ function parsePeopleFromText(text){
    if(items.length===1)return ordered[0].value;
    return Math.abs(ordered[0].index-person.index)<=8?ordered[0].value:'';
   };
-  return {name:person.name,dni:nearest(dnis),address:nearest(addresses)};
+  const address=nearest(addresses).replace(/^(?:en|sito\s+en|ubicad[oa]\s+en)\s+/i,'').trim();
+  return {name:person.name,dni:nearest(dnis),address};
  });
 }
 function fillFromText(t){
