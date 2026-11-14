@@ -213,73 +213,113 @@ $('analyzeBtn').onclick=async()=>{
  finally{$('analyzeBtn').disabled=false}
 };
 function find(pattern){const m=extractedText.match(pattern);return m?m[1].trim():''}
-function labelValues(text,label){
- const source=String(text||'').replace(/\r/g,'');
- const escaped=label.replace(/[.*+?^$()|[\]\\]/g,'\\$&');
- const allLabels='(?:Procedencia|Destinatari[oa]|Domicilio|Car[aá]cter|DNI|D\\.N\\.I\\.?|Documento|Causa|Expediente|Se solicita|Comisar[ií]a interviniente)';
- const values=[];
- const lineRe=new RegExp('(?:^|\\n)\\s*'+escaped+'\\s*:\\s*([^\\n]*)','gi');
- let m;
- while((m=lineRe.exec(source))!==null){
+function textLines(text){
+ return String(text||'').replace(/\r/g,'').split('\n').map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
+}
+function firstLabeledValue(lines,pattern){
+ for(let i=0;i<lines.length;i++){
+  const m=lines[i].match(pattern);
+  if(!m)continue;
   let value=(m[1]||'').trim();
-  if(!value){
-   const rest=source.slice(lineRe.lastIndex);
-   value=(rest.split('\n').map(x=>x.trim()).find(Boolean)||'');
-  }
-  if(value)values.push(value);
+  if(!value&&lines[i+1]&&!/^[A-ZÁÉÍÓÚÑa-záéíóúñ .º°/-]{2,35}\s*:/i.test(lines[i+1]))value=lines[i+1];
+  if(value)return value;
  }
- if(values.length)return values;
- const flatRe=new RegExp('(?:^|\\s)'+escaped+'\\s*:\\s*([\\s\\S]*?)(?=\\s+'+allLabels+'\\s*:|$)','gi');
- while((m=flatRe.exec(source))!==null){const value=(m[1]||'').trim();if(value)values.push(value)}
- return values;
+ return '';
+}
+function allLabeledValues(lines,pattern){
+ const found=[];
+ for(let i=0;i<lines.length;i++){
+  const m=lines[i].match(pattern);
+  if(!m)continue;
+  let value=(m[1]||'').trim();
+  if(!value&&lines[i+1]&&!/^[A-ZÁÉÍÓÚÑa-záéíóúñ .º°/-]{2,35}\s*:/i.test(lines[i+1]))value=lines[i+1];
+  if(value)found.push({value,index:i});
+ }
+ return found;
 }
 function cleanPersonName(value){
  let name=String(value||'').replace(/\s+/g,' ').trim();
  name=name.replace(/^(?:(?:AL|A LA|A LOS|A LAS)\s+)?/i,'');
- name=name.replace(/^(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+/i,'');
- name=name.replace(/\s+(?:DNI|D\.?\s*N\.?\s*I\.?|DOCUMENTO|CUIL|DOMICILIO|DIRECCI[ÓO]N|TEL[EÉ]FONO|FECHA)\b[\s\S]*$/i,'');
+ name=name.replace(/^(?:SR\.?|SRA\.?|SEÑOR(?:A)?|DON|DOÑA)\s*[:,.-]?\s+/i,'');
+ name=name.replace(/\s+(?:DNI|D\.?\s*N\.?\s*I\.?|DOCUMENTO|CUIL|DOMICILIO|DIRECCI[ÓO]N|CON DOMICILIO|DOMICILIAD[OA]|FECHA|TEL[EÉ]FONO)\b[\s\S]*$/i,'');
+ name=name.replace(/\s+(?:Y|O)\s+(?:OTROS?|OTRAS?)\s*$/i,'');
  name=name.replace(/[,:;.\-–—\s]+$/g,'').replace(/^[,:;.\-–—\s]+/g,'').replace(/\s+/g,' ').trim();
  if(name.length<5||name.length>90)return '';
- if(/^(?:JUEZ(?:A)?|FISCAL|SECRETARI[OA]|PROSECRETARI[OA]|MINISTERIO|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)\b/i.test(name))return '';
+ if(/^(?:JUEZ(?:A)?|FISCAL|SECRETARI[OA]|PROSECRETARI[OA]|MINISTERIO|FISCAL[IÍ]A|JUZGADO|TRIBUNAL|COMISAR[IÍ]A|SEÑOR JUEZ|SEÑORA JUEZA)\b/i.test(name))return '';
+ if(/\b(?:SE COMUNIQUE|COMPAREZCA|NOTIFIQUESE|NOTIFÍQUESE|CITAR|NOTIFICAR|SIRVASE|SÍRVASE|URGENTE)\b/i.test(name))return '';
  return /[a-záéíóúüñ]/i.test(name)?name:'';
 }
+function parsePeopleFromText(text){
+ const lines=textLines(text);
+ const recipientPattern=/^(?:destinatari[oa](?:\s+(?:de\s+la\s+)?notificaci[oó]n)?|persona\s+(?:a\s+notificar|a\s+citar|notificada|citada)|nombre\s+y\s+apellido|notificar\s+a|citar\s+a|intimar\s+a|emplazar\s+a|requerir\s+a)\s*[:\-]?\s*(.*)$/i;
+ const honorificPattern=/^(?:sr\.?|sra\.?|señor(?:a)?|don|doña)\s*[:,.-]?\s+(.+)$/i;
+ const recipients=[];
+ function add(name,index){
+  const cleaned=cleanPersonName(name);
+  if(!cleaned)return;
+  const key=cleaned.toLocaleLowerCase('es-AR');
+  if(!recipients.some(p=>p.key===key))recipients.push({name:cleaned,index,key});
+ }
+ for(let i=0;i<lines.length;i++){
+  let m=lines[i].match(recipientPattern);
+  if(m){
+   let candidate=m[1]||'';
+   if(!candidate&&lines[i+1])candidate=lines[i+1];
+   add(candidate,i);
+   continue;
+  }
+  m=lines[i].match(honorificPattern);
+  if(m)add(m[1],i);
+ }
+ // También reconoce expresiones narrativas: "notifíquese a...", "cítese a..." o "intímese a...".
+ const narrative=/(?:notifi(?:car|carse|quese)|c[ií]tese|citar|int[ií]mese|intimar|empl[aá]cese|emplazar|requ[ií]rase|requerir)\s+a\s+((?:(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+)?[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ'’-]+(?:\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ'’-]+){1,4})/g;
+ let nm;
+ while((nm=narrative.exec(String(text||'')))!==null)add(nm[1],Math.max(0,String(text||'').slice(0,nm.index).split('\n').length-1));
+ const addressPattern=/^(?:domicilio(?:\s+(?:real|actual|constituido|denunciado|procesal|de\s+notificaci[oó]n))?|direcci[oó]n(?:\s+(?:real|particular|actual))?|ubicaci[oó]n)\s*[:\-]\s*(.*)$/i;
+ const addressPhrase=/(?:con\s+domicilio|domiciliad[oa]|domiciliad[oa]\s+en|residente\s+en|reside\s+en|fija\s+domicilio\s+en)\s*[:\-]?\s*(.+)$/i;
+ const addresses=allLabeledValues(lines,addressPattern);
+ for(let i=0;i<lines.length;i++){const m=lines[i].match(addressPhrase);if(m)addresses.push({value:m[1],index:i})}
+ const dniPattern=/\b(?:DNI|D\.?\s*N\.?\s*I\.?|Documento(?:\s+Nacional\s+de\s+Identidad)?)\s*(?:N[°º.]?|NRO\.?)?\s*[:\-]?\s*([0-9.]{7,12})\b/i;
+ const dnis=[];
+ for(let i=0;i<lines.length;i++){const m=lines[i].match(dniPattern);if(m)dnis.push({value:m[1].replace(/\D/g,''),index:i})}
+ if(!recipients.length){
+  // Fallback para documentos que imprimen el nombre en una línea posterior al tratamiento.
+  for(let i=0;i<lines.length;i++){
+   if(/^(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s*$/i.test(lines[i])&&lines[i+1])add(lines[i+1],i);
+  }
+ }
+ return recipients.map(person=>{
+  const nearest=(items)=>{
+   if(!items.length)return '';
+   const ordered=items.slice().sort((x,y)=>Math.abs(x.index-person.index)-Math.abs(y.index-person.index));
+   if(items.length===1)return ordered[0].value;
+   return Math.abs(ordered[0].index-person.index)<=8?ordered[0].value:'';
+  };
+  return {name:person.name,dni:nearest(dnis),address:nearest(addresses)};
+ });
+}
 function fillFromText(t){
- const low=t.toLowerCase();
- const procedencia=labelValues(t,'Procedencia')[0]||'';
+ const lines=textLines(t);
+ const value=(patterns)=>firstLabeledValue(lines,patterns);
+ const authority=value(/^(?:procedencia|organismo\s+remitente|dependencia\s+remitente|remitente|organismo)\s*[:\-]?\s*(.*)$/i)||find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\n]{0,120})/i);
+ const priority=value(/^(?:car[aá]cter|prioridad|urgencia|tipo\s+de\s+tr[aá]mite)\s*[:\-]?\s*(.*)$/i);
  $('fType').value=/notificaci[oó]n|destinatari[oa]|domicilio\s*:/i.test(t)?'Notificación':/citaci[oó]n|c[ií]tese/i.test(t)?'Citación':/resuelve|resoluci[oó]n/i.test(t)?'Resolución':/oficio/i.test(t)?'Oficio judicial':'Otro';
- const authority=procedencia||find(/((?:DEFENSOR[IÍ]A|FISCAL[IÍ]A|JUZGADO|TRIBUNAL)[^\n]{0,120})/i);
  $('fAuthority').value=authority;
  $('fOrg').value=/fiscal[ií]a/i.test(authority)?'Fiscalía':/juzgado|tribunal/i.test(authority)?'Juzgado':authority?'Otro':'No identificado';
  $('fCase').value=find(/(?:causa|expediente)\s*(?:n[°º.]?\s*)?([\w\-\/\.]{5,40})/i);
- const priority=labelValues(t,'Carácter')[0]||'';
  $('fPriority').value=priority;
  const requests=[];
- const requestMatch=t.match(/Se solicita[\s\S]{0,900}/i);
+ const requestMatch=t.match(/(?:Se solicita|se requiere|se intima|se ordena|deber[aá]\s+comunicarse)[\s\S]{0,1200}/i);
  if(requestMatch)requests.push(requestMatch[0].trim());
- const policeMatch=t.match(/Comisar[ií]a interviniente[\s\S]{0,350}/i);
+ const policeMatch=t.match(/Comisar[ií]a interviniente[\s\S]{0,500}/i);
  if(policeMatch&&!requests.join(' ').includes(policeMatch[0]))requests.push(policeMatch[0].trim());
- $('fAction').value=requests.length?requests.join('\n\n'):find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\.\n]{0,250})/i)||(/notific/i.test(low)?'Notificar a la/s persona/s indicada/s en el documento.':'');
+ $('fAction').value=requests.length?requests.join('\n\n'):find(/((?:notif[ií]quese|c[ií]tese|requ[ií]erase|ord[eé]nase|h[aá]gase saber)[^\.\n]{0,300})/i)||(/notific/i.test(t)?'Notificar a la/s persona/s indicada/s en el documento.':'');
  const notes=[];
  if(priority)notes.push('Carácter: '+priority);
- const deadlineInstruction=(t.match(/dentro de las\s+\d+\s+hs?\.?/i)||[])[0]||'';
+ const deadlineInstruction=(t.match(/(?:dentro de las|plazo de)\s+\d+\s+(?:hs?\.?|horas|d[ií]as)/i)||[])[0]||'';
  if(deadlineInstruction)notes.push('Plazo indicado: '+deadlineInstruction);
  $('fNotes').value=notes.join('. ');
- const recipients=labelValues(t,'Destinatario').map(cleanPersonName).filter(Boolean);
- const addresses=labelValues(t,'Domicilio');
- const dnis=[...labelValues(t,'DNI'),...labelValues(t,'D.N.I.'),...labelValues(t,'Documento')];
- peopleDraft=[];
- if(recipients.length){
-  recipients.forEach((name,i)=>peopleDraft.push({
-   name,
-   dni:dnis.length===1?dnis[0].replace(/\D/g,''):((dnis[i]||'').replace(/\D/g,'')),
-   address:addresses.length===1?addresses[0]:(addresses[i]||'')
-  }));
- }else{
-  const primary=find(/(?:SR\.?|SRA\.?|SEÑOR(?:A)?)\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{5,60}?)(?:[.,\n]|\s+DNI)/i);
-  const address=labelValues(t,'Domicilio')[0]||find(/DOMICILIO\s*:\s*([^\n]+)/i);
-  const dni=(find(/(?:DNI|D\.N\.I\.?|Documento)\s*(?:N[°º.]?\s*)?([0-9.]{7,12})/i)||'').replace(/\./g,'');
-  if(primary||dni)peopleDraft.push({name:cleanPersonName(primary),dni,address});
- }
+ peopleDraft=parsePeopleFromText(t);
  if(!peopleDraft.length)peopleDraft=[{name:'',dni:'',address:''}];
  renderPeople();
  const dateMatch=t.match(/(?:para\s+el\s+|el\s+)(\d{1,2}\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+\s+de\s+20\d{2})\s+a\s+las\s+(\d{1,2}:\d{2})/i);
